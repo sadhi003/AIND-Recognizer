@@ -77,7 +77,25 @@ class SelectorBIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        # BIC score = -2logL + plogN(penalize part)
+        # where L -> likelihood of model that is fitted
+        # N -> data points 
+        # p -> number of parameters
+        bic_scores = []
+        try:
+            for n in self.n_components:
+                model = self.base_model(n)
+                log_l = model.score(self.X, self.lengths)
+                # calculate number of parameters
+                p = n ** 2 + 2 * n * model.n_features - 1
+                bic_score = -2 * log_l + p * math.log(n)
+                bic_scores.append(bic_score)
+        except Exception as e:
+            pass
+
+        states = self.n_components[np.argmax(bic_scores)] if bic_scores else self.n_constant
+        return self.base_model(states)
+        
 
 
 class SelectorDIC(ModelSelector):
