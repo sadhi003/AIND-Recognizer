@@ -27,6 +27,7 @@ class ModelSelector(object):
         self.max_n_components = max_n_components
         self.random_state = random_state
         self.verbose = verbose
+        self.n_components = range(self.min_n_components, self.max_n_components + 1)
 
     def select(self):
         raise NotImplementedError
@@ -81,12 +82,12 @@ class SelectorBIC(ModelSelector):
         # where L -> likelihood of model that is fitted
         # N -> data points 
         # p -> number of parameters
+
         bic_scores = []
         try:
             for n in self.n_components:
                 model = self.base_model(n)
                 log_l = model.score(self.X, self.lengths)
-                # calculate number of parameters
                 p = n ** 2 + 2 * n * model.n_features - 1
                 bic_score = -2 * log_l + p * math.log(n)
                 bic_scores.append(bic_score)
@@ -111,7 +112,30 @@ class SelectorDIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        # DIC score = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
+        
+        dic_scores = []
+        logs_l = []
+        try:
+            for n_component in self.n_components:
+                model = self.base_model(n_component)
+                logs_l.append(model.score(self.X, self.lengths))
+            sum_logs_l = sum(logs_l)
+            m = len(self.n_components)
+            for log_l in logs_l:     
+                other_words_likelihood = (sum_logs_l - log_l) / (m - 1)
+                dic_scores.append(log_l - other_words_likelihood)
+        except Exception as e:
+            pass
+
+        states = self.n_components[np.argmax(dic_scores)] if dic_scores else self.n_constant
+        return self.base_model(states)
+
+class TestMyCode(ModelSelector):
+
+    def select(self):
+        print ("this is the test code for method overriding")
+        return None
 
 
 class SelectorCV(ModelSelector):
@@ -123,4 +147,55 @@ class SelectorCV(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection using CV
-        raise NotImplementedError
+        # check based on cross validation
+
+        split_cnt = 3 # 3 fold
+        kf = KFold(n_splits=split_cnt)
+        
+        max_logl = float("-inf")
+        max_logl_n = self.min_n_components
+        
+        for n in range(self.min_n_components, self.max_n_components):
+            try:
+                avg_logL = 0
+                for train_index, test_index in kf.split(self.sequences):
+                    cv_train_param_X, cv_train_param_lengths = combine_sequences(train_index, self.sequences)
+                    model = self.base_model(n, param_X=cv_train_param_X, param_lengths=cv_train_param_lengths)
+                    cv_test_param_X, cv_test_param_lengths = combine_sequences(test_index, self.sequences)
+                    logL = model.score(cv_test_param_X, cv_test_param_lengths)
+                    avg_logL = avg_logL + logL/split_cnt
+                if avg_logL > max_logl:
+                    max_log_l = avg_logL
+                    max_logl_n = n
+            except:
+                if self.verbose:
+                    print("failure on {} with {} states".format(self.this_word, n))
+                
+        return self.base_model(max_logl_n)
+
+
+'''        
+        mean_scores = []
+        split_method = KFold()
+        try:
+            for n_component in self.n_components:
+                model = self.base_model(n_component)
+                # save score on each fold
+                fold_scores = []
+                for _, test_idx in split_method.split(self.sequences):
+                    test_X, test_length = combine_sequences(test_idx, self.sequences)
+                    fold_scores.append(model.score(test_X, test_length))
+
+                # get mean value from each score
+                mean_scores.append(np.mean(fold_scores))
+        except Exception as e:
+            pass
+
+        states = self.n_components[np.argmax(mean_scores)] if mean_scores else self.n_constant
+        return self.base_model(states)
+'''
+
+
+
+
+
