@@ -18,27 +18,30 @@ def recognize(models: dict, test_set: SinglesData):
            ['WORDGUESS0', 'WORDGUESS1', 'WORDGUESS2',...]
     """
     warnings.filterwarnings("ignore", category=DeprecationWarning)
+    
     probabilities = []
     guesses = []
-    # implement recognizer 
-    X_lengths = test_set.get_all_Xlengths()
-    for X, lengths in X_lengths.values():
-      score_dict = {} 
-      #initialize maximum score as infinity
-      max_score = float("-inf")
-      best_guess = None
-      for word, model in models.items():
-        try:
-          
-          log_l = model.score(X,lengths)
-          if log_l > max_score:
-            max_score = log_l
-            best_guess = word
-        except:
-          None
-        score_dict[word] = log_l
-      
-      guesses.append(best_guess)
-      probabilities.append(score_dict)
     
+    X_lengths = test_set.get_all_Xlengths()
+    
+    for X, lengths in X_lengths.values():
+        log_likelihood = {} # Save the likelihood of a word
+        max_score = float("-inf") # Save max score as recognizer iterates the list
+        best_guess = None # Save best guess as recognizer iterates the list
+        for word, model in models.items():
+            try:
+                # Score word using model
+                word_score = model.score(X, lengths)
+                log_likelihood[word] = word_score
+
+                if word_score > max_score:
+                    max_score = word_score
+                    best_guess = word
+            except:
+                # Unable to process word
+                log_likelihood[word] = float("-inf")
+
+        guesses.append(best_guess)
+        probabilities.append(log_likelihood)
+
     return probabilities, guesses

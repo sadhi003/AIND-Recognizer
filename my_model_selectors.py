@@ -62,12 +62,35 @@ class SelectorConstant(ModelSelector):
         return self.base_model(best_num_components)
 
 
+##################   SelectorBIC #########################
+
 class SelectorBIC(ModelSelector):
     """ select the model with the lowest Bayesian Information Criterion(BIC) score
 
     http://www2.imm.dtu.dk/courses/02433/doc/ch6_slides.pdf
     Bayesian information criteria: BIC = -2 * logL + p * logN
     """
+
+
+    def bic_score(self, num_states):        
+        """
+         BIC Equation:  BIC = -2 * log L + p * log N 
+            L : is the likelihood of the fitted model
+            p : is the number of parameters
+            N : is the number of data points
+                    
+        Notes:
+          -2 * log L    -> decreases with higher "p"
+          p * log N     -> increases with higher "p"
+          N > e^2 = 7.4 -> BIC applies larger "penalty term" in this case
+            
+        """
+        
+        model = self.base_model(num_states)
+        log_likelihood = model.score(self.X, self.lengths)
+        number_of_parameters = num_states ** 2 + 2 * num_states * model.n_features - 1
+        score = -2 * log_likelihood + number_of_parameters * np.log(num_states)
+        return score, model
 
     def select(self):
         """ select the best model for self.this_word based on
@@ -78,26 +101,26 @@ class SelectorBIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on BIC scores
-        # BIC score = -2logL + plogN(penalize part)
-        # where L -> likelihood of model that is fitted
-        # N -> data points 
-        # p -> number of parameters
-
-        bic_scores = []
-        try:
-            for n in self.n_components:
-                model = self.base_model(n)
-                log_l = model.score(self.X, self.lengths)
-                p = n ** 2 + 2 * n * model.n_features - 1
-                bic_score = -2 * log_l + p * math.log(n)
-                bic_scores.append(bic_score)
-        except Exception as e:
-            pass
-
-        states = self.n_components[np.argmax(bic_scores)] if bic_scores else self.n_constant
-        return self.base_model(states)
         
 
+        try:
+            
+            best_score = float("Inf") 
+            best_model = None
+
+            for num_states in range(self.min_n_components, self.max_n_components + 1):
+                score, model = self.bic_score(num_states)
+                if score < best_score:
+                    best_score, best_model = score, model
+            return best_model
+
+        except:
+            return self.base_model(self.n_constant)
+
+        
+        
+
+################# Selector DIC #########################
 
 class SelectorDIC(ModelSelector):
     ''' select best model based on Discriminative Information Criterion
@@ -108,40 +131,99 @@ class SelectorDIC(ModelSelector):
     DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
     '''
 
+    def dic_score(self, num_states):
+        """
+          DIC Equation:
+            DIC = log(P(X(i)) - 1/(M - 1) * sum(log(P(X(all but i))
+            i <- current_word
+            DIC = log likelihood of the data belonging to model
+                - avg of anti-log likelihood of data X and model M
+                = log(P(original word)) - average(log(P(other words)))
+               
+            where anti-log likelihood means likelihood of data X and model M belonging
+            to competing categories where log(P(X(i))) is the log-likelihood of the fitted
+            model for the current word.
+        
+          Note:
+            - log likelihood of the data belonging to model
+            - anti_log_likelihood of data X vs model M
+        """
+        
+        model = self.base_model(num_states)
+        logs_likelihood = []
+        
+        for word, (X, lengths) in self.hwords.items():
+            
+            # likelihood of current word
+            if word == self.this_word:
+                current_word_likelihood = model.score(self.X, self.lengths)
+                
+            # if word != self.this_word:
+            # likelihood of remaining words
+            else:
+                logs_likelihood.append(model.score(X, lengths))
+             
+        score = current_word_likelihood - np.mean(logs_likelihood)
+        
+        return score, model
+
+
+
+
+
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on DIC scores
-        # DIC score = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
-        
-        dic_scores = []
-        logs_l = []
         try:
-            for n_component in self.n_components:
-                model = self.base_model(n_component)
-                logs_l.append(model.score(self.X, self.lengths))
-            sum_logs_l = sum(logs_l)
-            m = len(self.n_components)
-            for log_l in logs_l:     
-                other_words_likelihood = (sum_logs_l - log_l) / (m - 1)
-                dic_scores.append(log_l - other_words_likelihood)
-        except Exception as e:
-            pass
+            best_score = float("-Inf")
+            best_model = None
+            
+            for num_states in range(self.min_n_components, self.max_n_components+1):
+                score, model = self.dic_score(num_states)
+                if score > best_score:
+                    best_score = score
+                    best_model = model
+            return best_model   
 
-        states = self.n_components[np.argmax(dic_scores)] if dic_scores else self.n_constant
-        return self.base_model(states)
+        except:
+            return self.base_model(self.n_constant)
 
-class TestMyCode(ModelSelector):
 
-    def select(self):
-        print ("this is the test code for method overriding")
-        return None
+#############  Selector CV #################################
 
 
 class SelectorCV(ModelSelector):
     ''' select best model based on average log Likelihood of cross-validation folds
 
     '''
+    def cv_score(self, num_states):
+        """
+        Calculate the average log likelihood of cross-validation folds using the KFold class
+        :return: tuple of the mean likelihood and the model with the respective score
+        
+        CV Equation:
+        
+        
+        """
+        fold_scores = []
+        split_method = KFold(n_splits = 3, shuffle = True, random_state = 1)
+        
+        
+        for train_idx, test_idx in split_method.split(self.sequences):
+            # Training sequences split using KFold are recombined
+            self.X, self.lengths = combine_sequences(train_idx, self.sequences)
+            # Get test sequences
+            test_X, test_length = combine_sequences(test_idx, self.sequences)
+            # Record each model score
+            model = self.base_model(num_states)
+            fold_scores.append(model.score(test_X, test_length))
+            
+        # Compute mean of all fold scores
+        score = np.mean(fold_scores)
+            
+        return score, model
+
+    
 
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -149,51 +231,20 @@ class SelectorCV(ModelSelector):
         # TODO implement model selection using CV
         # check based on cross validation
 
-        split_cnt = 3 # 3 fold
-        kf = KFold(n_splits=split_cnt)
-        
-        max_logl = float("-inf")
-        max_logl_n = self.min_n_components
-        
-        for n in range(self.min_n_components, self.max_n_components):
-            try:
-                avg_logL = 0
-                for train_index, test_index in kf.split(self.sequences):
-                    cv_train_param_X, cv_train_param_lengths = combine_sequences(train_index, self.sequences)
-                    model = self.base_model(n, param_X=cv_train_param_X, param_lengths=cv_train_param_lengths)
-                    cv_test_param_X, cv_test_param_lengths = combine_sequences(test_index, self.sequences)
-                    logL = model.score(cv_test_param_X, cv_test_param_lengths)
-                    avg_logL = avg_logL + logL/split_cnt
-                if avg_logL > max_logl:
-                    max_log_l = avg_logL
-                    max_logl_n = n
-            except:
-                if self.verbose:
-                    print("failure on {} with {} states".format(self.this_word, n))
-                
-        return self.base_model(max_logl_n)
-
-
-'''        
-        mean_scores = []
-        split_method = KFold()
         try:
-            for n_component in self.n_components:
-                model = self.base_model(n_component)
-                # save score on each fold
-                fold_scores = []
-                for _, test_idx in split_method.split(self.sequences):
-                    test_X, test_length = combine_sequences(test_idx, self.sequences)
-                    fold_scores.append(model.score(test_X, test_length))
+            best_score = float("Inf")
+            best_model = None
+            
+            for num_states in range(self.min_n_components, self.max_n_components+1):
+                score, model = self.cv_score(num_states)
+                if score < best_score:
+                    best_score = score
+                    best_model = model
+            return best_model
+        except:
+            return self.base_model(self.n_constant)
 
-                # get mean value from each score
-                mean_scores.append(np.mean(fold_scores))
-        except Exception as e:
-            pass
 
-        states = self.n_components[np.argmax(mean_scores)] if mean_scores else self.n_constant
-        return self.base_model(states)
-'''
 
 
 
